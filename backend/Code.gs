@@ -10,16 +10,45 @@ var APP_URL = 'https://magikswork.github.io/vzmakh-app/';
 var PHOTO_FOLDER_NAME = 'Взмах · фото из приложения';
 var MAX_PHOTOS = 6;
 
+// Вкладки таблицы данных. manual: true — заполняете вы, иначе — само приложение.
 var SHEETS = {
-  teachers:  { name: 'Учителя',     head: ['id', 'ФИО', 'Предметы', 'Email', 'Код', 'Роль', 'Активен'] },
-  bells:     { name: 'Звонки',      head: ['Урок', 'Начало', 'Конец'] },
-  schedule:  { name: 'Расписание',  head: ['Класс', 'День', 'Урок', 'Предмет', 'Учитель', 'Кабинет'] },
-  subs:      { name: 'Замены',      head: ['id', 'Дата', 'Класс', 'Урок', 'Предмет', 'Учитель', 'Кабинет', 'Комментарий', 'Автор'] },
+  settings:  { name: 'Настройки',   manual: true, head: ['Параметр', 'Значение', 'Пояснение'], widths: [190, 420, 420] },
+  teachers:  { name: 'Учителя',     manual: true, head: ['id', 'ФИО', 'Предметы', 'Email', 'Код', 'Роль', 'Активен'], widths: [110, 220, 220, 230, 110, 90, 80] },
   homework:  { name: 'ДЗ',          head: ['id', 'Создано', 'Класс', 'Предмет', 'Задание', 'Ссылка', 'Фото', 'Срок', 'Автор'] },
   requests:  { name: 'Запросы',     head: ['id', 'Создано', 'От', 'Кому', 'Тема', 'Описание', 'Ссылка', 'Фото', 'Статус', 'Обновлено'] },
-  comments:  { name: 'Комментарии', head: ['id', 'Запрос', 'Автор', 'Текст', 'Фото', 'Статус', 'Создано'] },
-  settings:  { name: 'Настройки',   head: ['Параметр', 'Значение', 'Пояснение'] }
+  comments:  { name: 'Комментарии', head: ['id', 'Запрос', 'Автор', 'Текст', 'Фото', 'Статус', 'Создано'] }
 };
+
+var GUIDE_ = [
+  ['Взмах · данные приложения', ''],
+  ['', ''],
+  ['Вкладка', 'Что в ней и кто заполняет'],
+  ['Настройки', 'ЗАПОЛНЯЕТЕ ВЫ. Ссылка на таблицу расписания завучей, свои кабинеты, ссылки на таблицы «Значимые оценки» по классам.'],
+  ['Учителя', 'ЗАПОЛНЯЕТЕ ВЫ. Одна строка — один учитель: ФИО, Предметы, Email (туда приходят письма о запросах), Роль («админ» или пусто). id и Код не трогайте: нажмите меню «Взмах → Выдать коды учителям без кода». Чтобы отключить учителя — «нет» в «Активен».'],
+  ['ДЗ', 'Заполняет приложение, когда учитель публикует домашнее задание. Руками не правьте.'],
+  ['Запросы', 'Заполняет приложение: запросы учителей друг другу. Руками не правьте.'],
+  ['Комментарии', 'Заполняет приложение: ответы на запросы. Руками не правьте.'],
+  ['', ''],
+  ['Чего здесь нет', ''],
+  ['Расписание', 'Его ведут завучи в своей таблице. Сюда — только ссылка на неё (вкладка «Настройки»).'],
+  ['Оценки', 'Остаются в таблицах «Значимые оценки». Приложение читает их на лету и никуда не копирует.'],
+  ['Фото', 'Лежат в папке Google Диска «Взмах · фото из приложения».'],
+  ['', ''],
+  ['Меню «Взмах»', 'Появляется сверху, рядом с «Справка». «Выдать коды учителям без кода» — после добавления новых учителей.']
+];
+
+function guideSheet_(ss) {
+  var sh = ss.getSheetByName('Как заполнять') || ss.insertSheet('Как заполнять', 0);
+  sh.clear();
+  sh.getRange(1, 1, GUIDE_.length, 2).setValues(GUIDE_).setWrap(true).setVerticalAlignment('top');
+  sh.getRange('A1').setFontSize(16).setFontWeight('bold');
+  sh.getRange('A3:B3').setFontWeight('bold').setBackground('#FDEEDF');
+  sh.getRange('A4:A8').setFontWeight('bold');
+  sh.getRange('A10').setFontWeight('bold');
+  sh.getRange('A4:B5').setBackground('#FFF8F0');
+  sh.setColumnWidth(1, 170); sh.setColumnWidth(2, 640);
+  sh.setTabColor('#E8731A');
+}
 
 var STATUS = { review: 'На проверке', fix: 'Нужно поправить', ok: 'Принято' };
 
@@ -28,23 +57,43 @@ var STATUS = { review: 'На проверке', fix: 'Нужно поправи�
 /** Запустите один раз из редактора: создаст вкладки, папку для фото и ваш код входа. */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  Object.keys(SHEETS).forEach(function (key) {
+  guideSheet_(ss);
+  Object.keys(SHEETS).forEach(function (key, i) {
     var def = SHEETS[key];
     var sh = ss.getSheetByName(def.name) || ss.insertSheet(def.name);
     if (sh.getLastRow() === 0) sh.appendRow(def.head);
-    sh.getRange(1, 1, 1, def.head.length).setFontWeight('bold').setBackground('#FDEEDF');
+    var head = sh.getRange(1, 1, 1, def.head.length).setFontWeight('bold');
     sh.setFrozenRows(1);
+    if (def.manual) { head.setBackground('#FDEEDF'); sh.setTabColor('#2D5C93'); }
+    else {
+      head.setBackground('#E8E8E8').setNote('Эту вкладку заполняет приложение. Руками не правьте.');
+      sh.setTabColor('#B7B7B7');
+    }
+    (def.widths || []).forEach(function (w, c) { sh.setColumnWidth(c + 1, w); });
+    ss.setActiveSheet(sh); ss.moveActiveSheet(i + 2);
   });
-  var first = ss.getSheetByName('Sheet1') || ss.getSheetByName('Лист1');
-  if (first && first.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(first);
+  ['Sheet1', 'Лист1', 'Звонки', 'Расписание', 'Замены'].forEach(function (n) {
+    var s = ss.getSheetByName(n);
+    if (s && s.getLastRow() <= 1 && ss.getSheets().length > 1) ss.deleteSheet(s);
+  });
 
-  // Текстовый формат для дат и кодов, чтобы таблица не превращала их во что-то своё.
-  ss.getSheetByName(SHEETS.teachers.name).getRange('E:E').setNumberFormat('@');
-  ss.getSheetByName(SHEETS.bells.name).getRange('B:C').setNumberFormat('@');
+  // Учителя: коды — текстом, подсказки и выпадающие списки
+  var tsh = ss.getSheetByName(SHEETS.teachers.name);
+  tsh.getRange('E:E').setNumberFormat('@');
+  tsh.getRange('A1').setNote('Заполнится само (меню «Взмах → Выдать коды»).');
+  tsh.getRange('B1').setNote('Как зовут учителя. Так его увидят коллеги в запросах.');
+  tsh.getRange('C1').setNote('Через запятую: «Русский язык, Литература». Подставляется в форму ДЗ.');
+  tsh.getRange('D1').setNote('На эту почту приходят письма о новых запросах и ответах.');
+  tsh.getRange('E1').setNote('Личный код входа. Заполнится сам (меню «Взмах → Выдать коды»). Раздавайте лично.');
+  tsh.getRange('F1').setNote('«админ» — может всё, иначе оставьте пустым.');
+  tsh.getRange('G1').setNote('«да» — код работает, «нет» — отключён.');
+  tsh.getRange('F2:F200').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['админ'], true).setAllowInvalid(true).build());
+  tsh.getRange('G2:G200').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['да', 'нет'], true).build());
 
   photoFolder_();
 
   var settings = ss.getSheetByName(SHEETS.settings.name);
+  settings.getRange('C:C').setWrap(true).setFontColor('#5A6678');
   if (settings.getLastRow() < 2) settings.appendRow(['Таблица расписания', '', 'Ссылка на Google Таблицу, где завучи ведут расписание. Её нужно открыть для вас (хотя бы на просмотр).']);
   if (settings.getLastRow() < 3) settings.appendRow(['Кабинеты', '', 'Новые кабинеты через запятую, если приложение их не узнаёт (основные уже знает).']);
   var have = readAll_('settings').map(function (s) { return norm_(s['Параметр']); });
@@ -59,6 +108,7 @@ function setup() {
     teachers.appendRow([newId_('t'), 'Лео (впишите ФИО)', 'Обществознание', Session.getEffectiveUser().getEmail(), code, 'админ', 'да']);
     msg += ' Ваш код входа в приложение: ' + code;
   }
+  ss.setActiveSheet(ss.getSheetByName('Как заполнять'));
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
 }
@@ -145,27 +195,6 @@ var HANDLERS = {
     return { ok: true };
   },
 
-  'sub.save': function (me, b) {
-    if (me.role !== 'админ') throw new Error('Замены вносит администратор');
-    var it = b.item || {};
-    if (!isoDate_(it.date) || !String(it.cls || '').trim() || !it.lesson) throw new Error('Нужны дата, класс и номер урока');
-    var row = [it.id || newId_('s'), isoDate_(it.date), String(it.cls).trim(), Number(it.lesson) || it.lesson, clean_(it.subject, 80),
-               clean_(it.teacher, 80), clean_(it.room, 30), clean_(it.comment, 300), me.id];
-    if (it.id) {
-      var found = findRow_('subs', it.id);
-      if (!found) throw new Error('Замена не найдена');
-      found.sheet.getRange(found.row, 1, 1, row.length).setValues([row]);
-    } else sheet_('subs').appendRow(row);
-    return { ok: true };
-  },
-
-  'sub.delete': function (me, b) {
-    if (me.role !== 'админ') throw new Error('Замены удаляет администратор');
-    var found = findRow_('subs', b.id);
-    if (found) found.sheet.deleteRow(found.row);
-    return { ok: true };
-  },
-
   'grades.classes': function () {
     return { classes: gradeSheets_().map(function (g) { return g.cls; }) };
   },
@@ -248,10 +277,6 @@ var HANDLERS = {
 function publicData_() {
   var today = isoDate_(new Date());
   var from = addDays_(today, -7);
-  var subs = readAll_('subs').filter(function (s) { return s['Дата'] >= from; }).map(function (s) {
-    return { id: s.id, date: s['Дата'], cls: s['Класс'], lesson: Number(s['Урок']) || 0, subject: s['Предмет'],
-             teacher: s['Учитель'], room: s['Кабинет'], comment: s['Комментарий'] };
-  });
   var hw = readAll_('homework').filter(function (h) { return !h['Срок'] || h['Срок'] >= addDays_(today, -21); }).map(hwOut_);
   var sched = scheduleDays_();
   return {
@@ -259,13 +284,6 @@ function publicData_() {
     days: sched.days,
     scheduleSource: sched.source,
     scheduleError: sched.error || '',
-    bells: readAll_('bells').map(function (b) { return { lesson: Number(b['Урок']) || 0, start: hhmm_(b['Начало']), end: hhmm_(b['Конец']) }; })
-             .filter(function (b) { return b.lesson; }),
-    schedule: readAll_('schedule').map(function (s) {
-      return { cls: String(s['Класс']).trim(), day: dayNum_(s['День']), lesson: Number(s['Урок']) || 0,
-               subject: s['Предмет'], teacher: s['Учитель'], room: s['Кабинет'] };
-    }).filter(function (s) { return s.cls && s.day && s.lesson; }),
-    subs: subs,
     homework: hw,
     teachers: teachersList_()
   };

@@ -102,7 +102,27 @@ export const demoApi = {
         r.updated = c.created;
         return { ok: true, comment: clone(c), status: r.status };
       }
+      case 'grades.classes': return { classes: ['3 класс', '4 класс', '5 класс', '6 класс', '7 класс'] };
+      case 'grades.get': return clone(demoGrades(p.cls));
     }
     throw new Error('Неизвестное действие');
   }
 };
+
+/* Выдуманные «Ученик 1…» — в демо никаких настоящих детей */
+function demoGrades(cls) {
+  let seed = cls.charCodeAt(0) * 7 + 3;
+  const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  const mark = () => { const x = rnd(); return x < 0.08 ? '' : x < 0.14 ? 'н' : x < 0.2 ? '2' : x < 0.42 ? '3' : x < 0.72 ? '4' : '5'; };
+  const kids = n => Array.from({ length: n }, (_, i) => ({ name: `Ученик ${i + 1}` }));
+  const sheet = (works, sections) => ({ works: works.map(title => ({ title })), sections: sections.map(([label, n, start]) => ({ label,
+    rows: kids(n).map((k, i) => ({ name: `Ученик ${start + i}`, marks: works.map(mark) })) })) });
+  const subjects = [
+    { name: 'Русский язык', ...sheet(['Входной диктант', 'Проверочная работа', 'Словарный диктант', 'Самостоятельная', 'Проверочная работа 2'], [[cls + ' (1 группа)', 7, 1], [cls + ' (2 группа)', 7, 8]]) },
+    { name: 'Математика', ...sheet(['Входная работа', 'Действия с дробями', 'НОД и НОК', 'Разложение на множители'], [['', 14, 1]]) },
+    { name: 'Английский язык', ...sheet(['чтение · произношение', 'чтение · понимание', 'входное · грамматика', 'входное · письмо', 'словарный диктант', 'тест по юниту'], [['Группа 1', 5, 1], ['Группа 2', 5, 6], ['Группа 3', 4, 11]]) },
+    { name: 'История', ...sheet(['Самостоятельная', 'Тестовая работа'], [['', 14, 1]]) }
+  ];
+  const summary = { works: subjects.map(s => ({ title: s.name })), sections: [{ label: '', rows: kids(14).map((k, i) => ({ name: `Ученик ${i + 1}`, marks: subjects.map(() => String(3 + Math.floor(rnd() * 3))) })) }] };
+  return { cls, summary, subjects, url: '' };
+}

@@ -286,3 +286,26 @@ a.card:hover{border-color:var(--line-strong)}
 .td.past:hover{opacity:1}
 .td .lesson-hw{align-self:stretch}
 @media (max-width:380px){.td{grid-template-columns:26px 44px 1fr;gap:0 8px}.td-num{font-size:20px}.td-break{padding-left:14px}}
+
+/* ---------- оценки (только учителя) ---------- */
+.grades-tools{display:flex;gap:8px;align-items:center}
+.grades-tools .search{flex:1;min-width:0}
+.grades-box{display:flex;flex-direction:column;gap:8px}
+.grades-sum{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
+.grades-scroll{overflow-x:auto;background:var(--card);border:1.5px solid var(--line);border-radius:16px;-webkit-overflow-scrolling:touch}
+.grades{border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;min-width:100%}
+.grades th,.grades td{border-bottom:1px solid var(--line);padding:0;text-align:center;font-size:14.5px}
+.grades thead th{position:sticky;top:0;background:var(--card);font-size:11.5px;font-weight:600;color:var(--muted);vertical-align:bottom;padding:10px 4px 8px;min-width:46px;max-width:92px}
+.grades thead th span{hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
+.grades td{height:40px;min-width:46px;font-weight:700}
+.grades .g-name{position:sticky;left:0;z-index:1;background:var(--card);text-align:left;font-weight:600;font-size:14px;padding:6px 10px 6px 12px;min-width:132px;max-width:170px;border-right:1px solid var(--line);white-space:normal;line-height:1.25}
+.grades thead .g-name{z-index:2;font-size:12px}
+.grades .g-avg{border-left:1px solid var(--line);font-size:13.5px}
+.grades thead .g-avg{font-size:12px;color:var(--ink)}
+.grades .g-sec th{position:sticky;left:0;text-align:left;background:var(--blue-soft);color:var(--blue);font-size:12.5px;font-weight:700;padding:6px 12px}
+.grades tr:last-child > *{border-bottom:0}
+.grades .m5{color:var(--ok)}
+.grades .m4{color:var(--blue)}
+.grades .m3{color:var(--orange-ink)}
+.grades .m2{color:var(--red);background:var(--red-soft)}
+.grades .mx{color:var(--muted);font-weight:500}

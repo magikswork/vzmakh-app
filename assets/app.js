@@ -6,6 +6,7 @@ import { renderSchedule } from './views/schedule.js';
 import { renderHomework } from './views/homework.js';
 import { renderRequests, waitingCount } from './views/requests.js';
 import { renderLinks } from './views/links.js';
+import { renderGrades } from './views/grades.js';
 
 const S = {
   pub: store.get('pub', null),
@@ -21,6 +22,7 @@ const S = {
 const TABS = [
   { id: 'raspisanie', label: 'Расписание', icon: ICON.tSchedule },
   { id: 'dz', label: 'Домашка', icon: ICON.tHomework },
+  { id: 'ocenki', label: 'Оценки', icon: ICON.tGrades, teachers: true },
   { id: 'zaprosy', label: 'Запросы', icon: ICON.tRequests, teachers: true },
   { id: 'ssylki', label: 'Ссылки', icon: ICON.tLinks }
 ];
@@ -74,6 +76,7 @@ function render() {
   else if (tab === 'dz') main.appendChild(renderHomework(app));
   else if (tab === 'zaprosy') { main.appendChild(renderRequests(app, id)); if (S.me && !S.req && !S.reqError && !S.reqLoading) loadRequests(); }
   else if (tab === 'ssylki') main.appendChild(renderLinks(app));
+  else if (tab === 'ocenki') main.appendChild(renderGrades(app));
 
   const bottom = el('nav', { class: 'tabbar', 'aria-label': 'Разделы' }, tabLinks(tab, waiting));
   root.replaceChildren(header, main, bottom);
@@ -159,9 +162,9 @@ function accountSheet() {
 }
 
 function logout(msg) {
-  S.me = null; S.code = ''; S.req = null; S.hwMine = false;
+  S.me = null; S.code = ''; S.req = null; S.hwMine = false; S.grades = null;
   store.del('me'); store.del('code');
-  if (route().tab === 'zaprosy') location.hash = 'raspisanie';
+  if (['zaprosy', 'ocenki'].includes(route().tab)) location.hash = 'raspisanie';
   render();
   if (msg) toast(msg, 'error');
 }

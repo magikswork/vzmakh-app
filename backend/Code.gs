@@ -47,6 +47,10 @@ function setup() {
   var settings = ss.getSheetByName(SHEETS.settings.name);
   if (settings.getLastRow() < 2) settings.appendRow(['Таблица расписания', '', 'Ссылка на Google Таблицу, где завучи ведут расписание. Её нужно открыть для вас (хотя бы на просмотр).']);
   if (settings.getLastRow() < 3) settings.appendRow(['Кабинеты', '', 'Новые кабинеты через запятую, если приложение их не узнаёт (основные уже знает).']);
+  var have = readAll_('settings').map(function (s) { return norm_(s['Параметр']); });
+  Object.keys(DEFAULT_GRADE_SHEETS).forEach(function (cls) {
+    if (have.indexOf(norm_('Оценки ' + cls)) < 0) settings.appendRow(['Оценки ' + cls, 'https://docs.google.com/spreadsheets/d/' + DEFAULT_GRADE_SHEETS[cls] + '/edit', 'Таблица «Значимые оценки». Видят только учителя после входа.']);
+  });
 
   var teachers = ss.getSheetByName(SHEETS.teachers.name);
   var msg = 'Готово. Вкладки созданы.';
@@ -160,6 +164,29 @@ var HANDLERS = {
     var found = findRow_('subs', b.id);
     if (found) found.sheet.deleteRow(found.row);
     return { ok: true };
+  },
+
+  'grades.classes': function () {
+    return { classes: gradeSheets_().map(function (g) { return g.cls; }) };
+  },
+
+  'grades.get': function (me, b) {
+    var g = gradeSheets_().filter(function (x) { return x.cls === b.cls; })[0];
+    if (!g) throw new Error('Для этого класса нет таблицы оценок. Её можно добавить во вкладке «Настройки».');
+    var ss;
+    try { ss = SpreadsheetApp.openById(g.id); } catch (e) { throw new Error('Не получилось открыть таблицу оценок ' + g.cls + '. Проверьте, что у владельца приложения есть к ней доступ.'); }
+    var subjects = [], summary = null;
+    ss.getSheets().forEach(function (sh) {
+      var name = sh.getName();
+      if (GRADE_SKIP_RE_.test(name) || sh.getLastRow() < 3 || sh.getLastColumn() < 3) return;
+      var range = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn());
+      var merges = range.getMergedRanges().map(function (m) { return { r1: m.getRow() - 1, c1: m.getColumn() - 1, r2: m.getLastRow() - 1, c2: m.getLastColumn() - 1 }; });
+      var parsed = parseGradeSheet_(range.getDisplayValues(), merges);
+      if (!parsed.sections.length) return;
+      parsed.name = /предварит/i.test(name) ? 'Предварительные оценки' : pretty_(gradeTabName_(name));
+      if (/предварит/i.test(name)) summary = parsed; else subjects.push(parsed);
+    });
+    return { cls: g.cls, summary: summary, subjects: subjects, url: 'https://docs.google.com/spreadsheets/d/' + g.id + '/edit' };
   },
 
   'req.list': function (me) {
@@ -729,3 +756,90 @@ function pretty_(s) {
   return cap_(t);
 }
 function cap_(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+
+/* ============================== Оценки (только для учителей) ==============================
+ * Таблицы «Значимые оценки» по классам. Приложение читает их на лету и никуда не копирует.
+ * Вкладка предмета: строки 1–2 — названия работ, дальше блоки «6 класс (1 группа)» / «Группа 6.1»
+ * и строки «№ | Фамилия Имя | оценки…».
+ */
+
+var DEFAULT_GRADE_SHEETS = {
+  '3 класс': '1tQO7ZpuQdHvSBvaXAff-2MKN42nJJ36XsnH4qeAjk8E',
+  '4 класс': '1lEiwPcd1e8KZcEc_MEs034H_VcVR2QJKhJWP5gCEc3U',
+  '5 класс': '1I6NOoW_iZABiyCgaLxIhCs1DcovvgkXeFUuMb0i4XqI',
+  '6 класс': '1t-p50KxtHZ-kqZS_yrGFXogawUOekLWaLRsLUj_xSo8',
+  '7 класс': '1Nye6wsTND7eLEIm6BP4JpQd8sLPu1P-ssJOTjJxa-cs'
+};
+var GRADE_SKIP_RE_ = /список|подгрупп|пустограф|^лист\s*\d*$|^sheet\s*\d*$/i;
+
+function gradeSheets_() {
+  return readAll_('settings').filter(function (s) { return /^оценки\s/i.test(String(s['Параметр']).trim()); }).map(function (s) {
+    var m = /\/d\/([a-zA-Z0-9_-]{20,})/.exec(String(s['Значение'])) || /^([a-zA-Z0-9_-]{20,})$/.exec(String(s['Значение']).trim());
+    return m ? { cls: String(s['Параметр']).trim().replace(/^оценки\s+/i, ''), id: m[1] } : null;
+  }).filter(Boolean);
+}
+
+function gradeTabName_(s) {
+  var map = { 'инЯз 2 немец': 'Немецкий язык', 'иняз 2 испанск': 'Испанский язык', 'иняз 2 француз': 'Французский язык' };
+  var k = Object.keys(map).filter(function (x) { return norm_(x) === norm_(s); })[0];
+  return k ? map[k] : String(s).trim();
+}
+
+/** Разбор вкладки с оценками. Чистая функция: значения и объединения → { works, sections }. */
+function parseGradeSheet_(values, merges) {
+  var R = values.length, C = R ? values[0].length : 0;
+  var v = values.map(function (row) { return row.map(function (x) { return String(x == null ? '' : x).replace(/\r/g, '').trim(); }); });
+  (merges || []).forEach(function (m) {
+    var val = (v[m.r1] || [])[m.c1] || '';
+    for (var r = m.r1; r <= m.r2 && r < R; r++) for (var c = m.c1; c <= m.c2 && c < C; c++) v[r][c] = val;
+  });
+  var isSection = function (s) { return /класс|групп/i.test(s) && !/^\d+$/.test(s); };
+  var isName = function (s) { return /^[А-ЯЁA-Z][а-яёa-z\-]+(\s+[А-ЯЁA-Z][а-яёa-z\-\.]*){1,3}$/.test(s); };
+
+  // где имена: обычно столбец B (A — номер), иногда A
+  var nameCol = 1;
+  var countIn = function (c) { var n = 0; for (var r = 0; r < R; r++) if (isName(v[r][c] || '')) n++; return n; };
+  if (C > 1 && countIn(0) > countIn(1)) nameCol = 0;
+
+  // первая строка с учеником или блоком — всё выше неё заголовки
+  var title = v[0][0] || v[0][1];
+  var dataStart = -1;
+  for (var r = 1; r < R && dataStart < 0; r++) {
+    var s0 = v[r][nameCol];
+    if (s0 && s0 !== title && (isName(s0) || isSection(s0))) dataStart = r;
+  }
+  if (dataStart < 0) return { works: [], sections: [] };
+
+  var works = [];
+  for (var c = nameCol + 1; c < C; c++) {
+    var parts = [];
+    for (var h = 0; h < dataStart; h++) {
+      var x = v[h][c];
+      if (x && x !== title && parts.indexOf(x) < 0 && !isSection(x)) parts.push(x);
+    }
+    works.push({ col: c, title: parts.join(' · ') });
+  }
+
+  var sections = [], cur = null;
+  for (var r2 = dataStart; r2 < R; r2++) {
+    var cell = v[r2][nameCol];
+    if (!cell || cell === title) continue;
+    if (isSection(cell)) { cur = { label: cell, rows: [] }; sections.push(cur); continue; }
+    if (!isName(cell)) continue;
+    if (!cur) { cur = { label: '', rows: [] }; sections.push(cur); }
+    cur.rows.push({ name: cell.replace(/\s+/g, ' '), marks: works.map(function (w) { return v[r2][w.col]; }) });
+  }
+  sections = sections.filter(function (s) { return s.rows.length; });
+
+  // столбцы без названия и без единой оценки — убираем
+  var keep = works.map(function (w, i) {
+    return !!w.title || sections.some(function (s) { return s.rows.some(function (row) { return row.marks[i]; }); });
+  });
+  return {
+    works: works.filter(function (w, i) { return keep[i]; }).map(function (w, i) { return { title: w.title || 'Работа ' + (i + 1) }; }),
+    sections: sections.map(function (s) {
+      return { label: s.label, rows: s.rows.map(function (row) { return { name: row.name, marks: row.marks.filter(function (m, i) { return keep[i]; }) }; }) };
+    })
+  };
+}

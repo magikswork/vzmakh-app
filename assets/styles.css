@@ -246,3 +246,31 @@ a.card:hover{border-color:var(--line-strong)}
 @media (min-width:860px){.toast{bottom:28px}}
 
 @media (prefers-reduced-motion:reduce){*,*::before{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* ---------- лента дня (расписание завучей) ---------- */
+.updated{font-size:13px;color:var(--muted)}
+.center{text-align:center}
+.timeline-day{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.td{position:relative;display:grid;grid-template-columns:34px 50px 1fr;gap:0 10px;align-items:start;background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:12px 12px 12px 14px;overflow:hidden}
+.td::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--subj,transparent)}
+.td-num{font:700 24px/1 var(--display);color:var(--red);font-variant-numeric:tabular-nums;padding-top:2px}
+.td-time{display:flex;flex-direction:column;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;line-height:1.35;padding-top:2px}
+.td-time span:first-child{color:var(--ink);font-weight:600}
+.td-body{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+.td-title{font-weight:600;font-size:16.5px;overflow-wrap:anywhere}
+.td-label{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.td-groups{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.td-groups li{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:4px 10px;font-weight:600;font-size:14.5px;overflow-wrap:anywhere}
+.td-activity{background:transparent;border-style:dashed}
+.td-activity .td-title,.td-activity .td-groups li{font-weight:500}
+.td-activity .td-groups li{background:var(--card)}
+.td-break{display:flex;align-items:center;gap:10px;background:transparent;border:0;border-radius:12px;padding:4px 14px 4px 58px;min-height:30px;font-size:13.5px;color:var(--muted)}
+.td-break::before{display:none}
+.td-break-time{font-variant-numeric:tabular-nums;min-width:86px}
+.td-break.meal{background:var(--orange-soft);color:var(--orange-ink);font-weight:600;padding-block:7px}
+.td.now{border-color:var(--orange);box-shadow:0 0 0 2px color-mix(in srgb,var(--orange) 25%,transparent)}
+.td-break.now{background:var(--orange-soft);color:var(--ink)}
+.td.past{opacity:.55}
+.td.past:hover{opacity:1}
+.td .lesson-hw{align-self:stretch}
+@media (max-width:380px){.td{grid-template-columns:26px 44px 1fr;gap:0 8px}.td-num{font-size:20px}.td-break{padding-left:14px}}

@@ -17,7 +17,8 @@ var SHEETS = {
   subs:      { name: 'Замены',      head: ['id', 'Дата', 'Класс', 'Урок', 'Предмет', 'Учитель', 'Кабинет', 'Комментарий', 'Автор'] },
   homework:  { name: 'ДЗ',          head: ['id', 'Создано', 'Класс', 'Предмет', 'Задание', 'Ссылка', 'Фото', 'Срок', 'Автор'] },
   requests:  { name: 'Запросы',     head: ['id', 'Создано', 'От', 'Кому', 'Тема', 'Описание', 'Ссылка', 'Фото', 'Статус', 'Обновлено'] },
-  comments:  { name: 'Комментарии', head: ['id', 'Запрос', 'Автор', 'Текст', 'Фото', 'Статус', 'Создано'] }
+  comments:  { name: 'Комментарии', head: ['id', 'Запрос', 'Автор', 'Текст', 'Фото', 'Статус', 'Создано'] },
+  settings:  { name: 'Настройки',   head: ['Параметр', 'Значение', 'Пояснение'] }
 };
 
 var STATUS = { review: 'На проверке', fix: 'Нужно поправить', ok: 'Принято' };
@@ -42,6 +43,9 @@ function setup() {
   ss.getSheetByName(SHEETS.bells.name).getRange('B:C').setNumberFormat('@');
 
   photoFolder_();
+
+  var settings = ss.getSheetByName(SHEETS.settings.name);
+  if (settings.getLastRow() < 2) settings.appendRow(['Таблица расписания', '', 'Ссылка на Google Таблицу, где завучи ведут расписание. Её нужно открыть для вас (хотя бы на просмотр).']);
 
   var teachers = ss.getSheetByName(SHEETS.teachers.name);
   var msg = 'Готово. Вкладки созданы.';
@@ -221,8 +225,12 @@ function publicData_() {
              teacher: s['Учитель'], room: s['Кабинет'], comment: s['Комментарий'] };
   });
   var hw = readAll_('homework').filter(function (h) { return !h['Срок'] || h['Срок'] >= addDays_(today, -21); }).map(hwOut_);
+  var sched = scheduleDays_();
   return {
     updated: new Date().toISOString(),
+    days: sched.days,
+    scheduleSource: sched.source,
+    scheduleError: sched.error || '',
     bells: readAll_('bells').map(function (b) { return { lesson: Number(b['Урок']) || 0, start: hhmm_(b['Начало']), end: hhmm_(b['Конец']) }; })
              .filter(function (b) { return b.lesson; }),
     schedule: readAll_('schedule').map(function (s) {
@@ -383,3 +391,237 @@ function dayNum_(v) {
   if (/^\d$/.test(s)) return Number(s);
   return map[s.slice(0, 2)] || 0;
 }
+
+/* ============================== Расписание завучей ==============================
+ * Завучи ведут расписание в своей Google Таблице, как привыкли в Excel:
+ * блок «Понедельник 26.10» → строка с классами («3 класс», «4 класс»…) →
+ * строки по времени («1 урок: 10:15-10:55», «10:55-11:05» …).
+ * Группы в ячейке — через «/», своё время урока можно писать прямо в ячейке.
+ * Вкладок может быть сколько угодно: по дню, по неделе, всё на одной.
+ */
+
+var SCHEDULE_CACHE_SEC = 60;
+var SCHEDULE_DAYS_BACK = 7, SCHEDULE_DAYS_AHEAD = 21;
+
+function scheduleSourceId_() {
+  var rows = readAll_('settings');
+  for (var i = 0; i < rows.length; i++) {
+    if (/расписан/i.test(rows[i]['Параметр'])) {
+      var m = /\/d\/([a-zA-Z0-9_-]{20,})/.exec(String(rows[i]['Значение'])) || /^([a-zA-Z0-9_-]{20,})$/.exec(String(rows[i]['Значение']).trim());
+      return m ? m[1] : '';
+    }
+  }
+  return '';
+}
+
+/** Дни расписания из таблицы завучей (с кэшем на минуту). */
+function scheduleDays_() {
+  var id = scheduleSourceId_();
+  if (!id) return { days: [], source: 'none' };
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get('days:' + id);
+  if (hit) { try { return JSON.parse(hit); } catch (e) {} }
+  var out;
+  try {
+    var ss = SpreadsheetApp.openById(id);
+    var today = isoDate_(new Date());
+    var from = addDays_(today, -SCHEDULE_DAYS_BACK), to = addDays_(today, SCHEDULE_DAYS_AHEAD);
+    var days = [];
+    ss.getSheets().forEach(function (sh) {
+      var lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+      if (lastRow < 3 || lastCol < 2) return;
+      // быстрый отсев: есть ли на вкладке нужные даты
+      var head = sh.getRange(1, 1, Math.min(lastRow, 400), Math.min(lastCol, 30)).getDisplayValues();
+      var titleText = sh.getName() + ' ' + head.map(function (r) { return r.join(' '); }).join(' ');
+      var any = false;
+      findDates_(titleText).forEach(function (d) { if (d >= from && d <= to) any = true; });
+      if (!any) return;
+      var range = sh.getRange(1, 1, lastRow, lastCol);
+      var merges = range.getMergedRanges().map(function (m) {
+        return { r1: m.getRow() - 1, c1: m.getColumn() - 1, r2: m.getLastRow() - 1, c2: m.getLastColumn() - 1 };
+      });
+      parseScheduleGrid_(range.getDisplayValues(), merges, range.getBackgrounds(), sh.getName(), today).forEach(function (d) {
+        if (d.date >= from && d.date <= to) days.push(d);
+      });
+    });
+    // если один день встречается дважды — берём последний (свежая вкладка обычно правее)
+    var byDate = {};
+    days.forEach(function (d) { byDate[d.date] = d; });
+    out = { days: Object.keys(byDate).sort().map(function (k) { return byDate[k]; }), source: 'ok' };
+  } catch (err) {
+    return { days: [], source: 'error', error: 'Не получилось открыть таблицу с расписанием: ' + (err && err.message || err) };
+  }
+  try { cache.put('days:' + id, JSON.stringify(out), SCHEDULE_CACHE_SEC); } catch (e) {}
+  return out;
+}
+
+var WEEKDAYS_RE_ = /(понедельник|вторник|сред[аы]|четверг|пятниц[аы]|суббот[аы]|воскресень[ея])[^0-9]{0,6}(\d{1,2})[.\/](\d{1,2})(?:[.\/](\d{2,4}))?/i;
+
+function findDates_(text) {
+  var re = new RegExp(WEEKDAYS_RE_.source, 'gi'), m, out = [];
+  var today = isoDate_(new Date());
+  while ((m = re.exec(text))) out.push(dateFromParts_(m[2], m[3], m[4], today));
+  // вкладка может называться просто «26.10»
+  var re2 = /(^|\s)(\d{1,2})\.(\d{1,2})(?=\s|$)/g;
+  while ((m = re2.exec(text.slice(0, 40)))) out.push(dateFromParts_(m[2], m[3], '', today));
+  return out;
+}
+
+/** «26», «10», «» → ближайшая к сегодня дата с таким днём и месяцем. */
+function dateFromParts_(d, m, y, todayIso) {
+  d = Number(d); m = Number(m);
+  if (!d || !m || m > 12 || d > 31) return '';
+  var ty = Number(todayIso.slice(0, 4));
+  var year = y ? (String(y).length === 2 ? 2000 + Number(y) : Number(y)) : ty;
+  if (!y) {
+    var tm = Number(todayIso.slice(5, 7));
+    if (tm >= 9 && m <= 6) year = ty + 1;      // осенью видим «12.01» → следующий год
+    else if (tm <= 6 && m >= 9) year = ty - 1; // весной видим «26.10» → прошлый год
+  }
+  return year + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2);
+}
+
+/**
+ * Разбор сетки. Чистая функция: на входе значения, объединения и цвета, на выходе дни.
+ * values[r][c] — текст ячеек, merges — [{r1,c1,r2,c2}] (с нуля, включительно), colors[r][c] — фон.
+ */
+function parseScheduleGrid_(values, merges, colors, sheetName, todayIso) {
+  var R = values.length, C = R ? values[0].length : 0;
+  var v = values.map(function (row) { return row.map(function (x) { return String(x == null ? '' : x).replace(/\r/g, '').trim(); }); });
+  var bg = (colors || []).map(function (row) { return row.slice(); });
+  var span = []; // сколько классов накрывает объединённая ячейка
+  for (var r0 = 0; r0 < R; r0++) { span.push([]); for (var c0 = 0; c0 < C; c0++) span[r0].push(1); }
+  (merges || []).forEach(function (m) {
+    var val = (v[m.r1] || [])[m.c1] || '', col = bg[m.r1] ? bg[m.r1][m.c1] : '';
+    for (var r = m.r1; r <= m.r2 && r < R; r++) for (var c = m.c1; c <= m.c2 && c < C; c++) {
+      v[r][c] = val; if (bg[r]) bg[r][c] = col; span[r][c] = m.c2 - m.c1 + 1;
+    }
+  });
+
+  // начало каждого дня — строка с «Понедельник 26.10»
+  var starts = [];
+  for (var r = 0; r < R; r++) {
+    var line = v[r].join(' ');
+    var m = WEEKDAYS_RE_.exec(line);
+    if (m) {
+      if (starts.length && starts[starts.length - 1].row === r - 1 && starts[starts.length - 1].date === dateFromParts_(m[2], m[3], m[4], todayIso)) continue;
+      starts.push({ row: r, date: dateFromParts_(m[2], m[3], m[4], todayIso), title: cap_(m[1].toLowerCase()) + ', ' + m[2] + '.' + ('0' + m[3]).slice(-2) });
+    }
+  }
+  if (!starts.length) {
+    var fromName = findDates_(String(sheetName || ''));
+    if (fromName.length && fromName[0]) starts.push({ row: 0, date: fromName[0], title: String(sheetName) });
+  }
+
+  var days = [];
+  starts.forEach(function (st, i) {
+    var end = i + 1 < starts.length ? starts[i + 1].row : R;
+    // строка с классами
+    var headerRow = -1, cols = [];
+    for (var r = st.row; r < end && headerRow < 0; r++) {
+      var found = [];
+      for (var c = 0; c < C; c++) {
+        var cl = className_(v[r][c]);
+        if (cl && !found.some(function (f) { return f.name === cl; })) found.push({ col: c, name: cl });
+      }
+      if (found.length >= 2 || (found.length === 1 && C <= 3)) { headerRow = r; cols = found; }
+    }
+    if (headerRow < 0) return;
+    var labelCol = Math.max(0, cols[0].col - 1);
+
+    var items = {};
+    cols.forEach(function (cl) { items[cl.name] = []; });
+    var seenLesson = false;
+    for (var r2 = headerRow + 1; r2 < end; r2++) {
+      var label = v[r2][labelCol] || '';
+      var lessonNum = (/(\d{1,2})\s*-?\s*(й\s*)?урок/i.exec(label) || [])[1];
+      var labelTime = timeRanges_(label)[0] || null;
+      if (lessonNum) seenLesson = true;
+      cols.forEach(function (cl) {
+        var raw = v[r2][cl.col];
+        if (!raw || raw === label) return;
+        if (className_(raw)) return;
+        var ranges = timeRanges_(raw);
+        var text = stripTimes_(raw);
+        var time = ranges.length ? ranges[ranges.length - 1] : labelTime;
+        if (!time) return;
+        var groups = splitGroups_(text);
+        var kind, title = groups.join(' / ');
+        if (!groups.length) { kind = 'break'; title = 'Перемена'; }
+        else if (groups.length === 1 && /^(большая\s+)?(перемена|обед|полдник|завтрак|ужин|спортивная перемена|динамическая пауза)/i.test(groups[0])) kind = 'break';
+        else if (lessonNum) kind = 'lesson';
+        else if (!seenLesson || /самоподготовк|кружк/i.test(text)) kind = 'activity';
+        else kind = 'lesson';
+        var it = { kind: kind, start: time[0], end: time[1], title: title, groups: kind === 'break' ? [] : groups };
+        if (!ranges.length) it._labelTime = true;
+        if (kind === 'lesson' && lessonNum) it.num = Number(lessonNum);
+        if (kind === 'break' && /обед|полдник|завтрак|ужин/i.test(title)) it.meal = true;
+        if (span[r2][cl.col] > 1) it.common = true; // одно на несколько классов
+        var color = bg[r2] && bg[r2][cl.col];
+        if (color && !/^#?(fff|ffffff|000000)$/i.test(color)) it.color = color;
+        items[cl.name].push(it);
+      });
+    }
+    // по порядку времени; уроки без номера после последнего — продолжаем нумерацию
+    Object.keys(items).forEach(function (k) {
+      var list = items[k].sort(function (a, b) { return a.start < b.start ? -1 : a.start > b.start ? 1 : 0; });
+      // перемена без своего времени у класса со своим временем (как у 7 класса) — встаёт между соседями
+      list.forEach(function (it, j) {
+        var prev = list[j - 1], next = list[j + 1];
+        if (it.kind === 'break' && it._labelTime) {
+          if (prev && it.start < prev.end) it.start = prev.end;
+          if (next && (it.end > next.start || it.end <= it.start)) it.end = next.start;
+        }
+        delete it._labelTime;
+      });
+      var last = 0;
+      list.forEach(function (it) {
+        if (it.kind !== 'lesson') return;
+        if (it.num) last = it.num; else if (last) it.num = ++last;
+      });
+      // одинаковые строки подряд (объединённые по вертикали) — оставляем одну
+      items[k] = list.filter(function (it, j) { var p = list[j - 1]; return !p || p.title !== it.title || p.start !== it.start; });
+    });
+    days.push({ date: st.date, title: st.title, classes: cols.map(function (c) { return c.name; }), items: items });
+  });
+  return days;
+}
+
+/** «3 класс», «5А», «10 Б класс» → название класса; иначе пусто. */
+function className_(s) {
+  s = String(s || '').trim();
+  var m = /^(\d{1,2})\s*[«"]?([а-яё])?[»"]?\s*класс(ы)?$/i.exec(s) || /^(\d{1,2})\s*[«"\-]?([а-яё])[»"]?$/i.exec(s);
+  if (!m) return '';
+  return m[2] ? m[1] + m[2].toUpperCase() : m[1] + ' класс';
+}
+
+/** Все интервалы времени в тексте: «10:15-10:55», «9.10 - 9.50», «09:30 – 09:50». */
+function timeRanges_(s) {
+  var re = /(\d{1,2})[:.](\d{2})\s*[-–—]\s*(\d{1,2})[:.](\d{2})/g, m, out = [];
+  while ((m = re.exec(String(s || '')))) out.push([('0' + m[1]).slice(-2) + ':' + m[2], ('0' + m[3]).slice(-2) + ':' + m[4]]);
+  return out;
+}
+function stripTimes_(s) {
+  return String(s || '').replace(/(\d{1,2})[:.](\d{2})\s*[-–—]\s*(\d{1,2})[:.](\d{2})/g, ' ').replace(/[ \t]+/g, ' ').trim();
+}
+
+/** Делим ячейку на группы: «РУССКИЙ ЯЗЫК / МАТЕМАТИКА», «- Кружок\n- Клуб». */
+function splitGroups_(text) {
+  var parts = String(text || '').split(/\s*\/\s*|\n\s*[-–•]\s*|^\s*[-–•]\s*/);
+  var out = [];
+  parts.forEach(function (p) {
+    p = p.replace(/\s*\n\s*/g, ' ').replace(/^[-–•\s]+|[\s:;,]+$/g, '').trim();
+    if (p) out.push(pretty_(p));
+  });
+  return out;
+}
+
+/** «РУССКИЙ ЯЗЫК (ПРЕДЗАЧЕТ)» → «Русский язык (предзачет)», аббревиатуры (РПС, ТДФ) не трогаем. */
+function pretty_(s) {
+  if (/[а-яё]/.test(s) || !/[А-ЯЁ]/.test(s)) return s;
+  var t = s.replace(/[А-ЯЁA-Z]+/g, function (w) {
+    return (w.length <= 4 && !/[АЕЁИОУЫЭЮЯAEIOUY]/.test(w)) ? w : w.toLowerCase();
+  });
+  return cap_(t);
+}
+function cap_(s) { return s.charAt(0).toUpperCase() + s.slice(1); }

@@ -29,7 +29,7 @@ export function renderHomework(app) {
   const all = (pub?.homework || []).filter(h => mine ? h.author === S.me.id : splitClasses(h.cls).includes(S.sel.cls));
   if (!all.length) {
     view.appendChild(empty(mine ? 'Вы ещё не задавали ДЗ' : 'Заданий нет',
-      mine ? 'Нажмите «Задание», чтобы добавить первое.' : (classes.length ? `Для ${S.sel.cls} пока ничего не задано.` : 'Учителя ещё не добавили ни одного задания.')));
+      mine ? 'Нажмите «Задание», чтобы добавить первое.' : (classes.length ? `Для ${S.sel.cls.replace(/^(\d+) класс$/, '$1-го класса')} пока ничего не задано.` : 'Учителя ещё не добавили ни одного задания.')));
     return view;
   }
 

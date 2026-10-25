@@ -79,6 +79,11 @@ function render() {
   root.replaceChildren(header, main, bottom);
   document.title = (TABS.find(t => t.id === tab)?.label || 'Взмах') + ' · Взмах';
   if (keepScroll) window.scrollTo(0, keepScroll);
+  // выбранный класс всегда виден в ленте классов
+  document.querySelectorAll('.chips-scroll').forEach(row => {
+    const on = row.querySelector('.chip.on');
+    if (on) row.scrollLeft = on.offsetLeft - row.clientWidth / 2 + on.offsetWidth / 2;
+  });
 }
 
 function tabLinks(active, waiting) {
@@ -171,5 +176,10 @@ document.addEventListener('visibilitychange', () => {
 
 render();
 refreshPublic();
+// Пока приложение открыто, раз в минуту подтягиваем изменения расписания и ДЗ.
+setInterval(() => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '') || document.querySelector('.overlay');
+  if (document.visibilityState === 'visible' && !typing) refreshPublic();
+}, 60e3);
 // Проверяем сохранённый код (могли отозвать) и обновляем роль.
 if (S.code) api.post('login', {}, S.code).then(res => { S.me = res.teacher; store.set('me', S.me); render(); }, e => { if (e.code === 'auth') logout('Код больше не действует. Войдите заново.'); });

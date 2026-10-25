@@ -46,6 +46,7 @@ function setup() {
 
   var settings = ss.getSheetByName(SHEETS.settings.name);
   if (settings.getLastRow() < 2) settings.appendRow(['Таблица расписания', '', 'Ссылка на Google Таблицу, где завучи ведут расписание. Её нужно открыть для вас (хотя бы на просмотр).']);
+  if (settings.getLastRow() < 3) settings.appendRow(['Кабинеты', '', 'Новые кабинеты через запятую, если приложение их не узнаёт (основные уже знает).']);
 
   var teachers = ss.getSheetByName(SHEETS.teachers.name);
   var msg = 'Готово. Вкладки созданы.';
@@ -424,6 +425,7 @@ function scheduleDays_() {
   var out;
   try {
     var ss = SpreadsheetApp.openById(id);
+    var rooms = settingList_('кабинет');
     var today = isoDate_(new Date());
     var from = addDays_(today, -SCHEDULE_DAYS_BACK), to = addDays_(today, SCHEDULE_DAYS_AHEAD);
     var days = [];
@@ -440,7 +442,7 @@ function scheduleDays_() {
       var merges = range.getMergedRanges().map(function (m) {
         return { r1: m.getRow() - 1, c1: m.getColumn() - 1, r2: m.getLastRow() - 1, c2: m.getLastColumn() - 1 };
       });
-      parseScheduleGrid_(range.getDisplayValues(), merges, range.getBackgrounds(), sh.getName(), today).forEach(function (d) {
+      parseScheduleGrid_(valuesWithoutRed_(range), merges, range.getBackgrounds(), sh.getName(), today, { rooms: rooms }).forEach(function (d) {
         if (d.date >= from && d.date <= to) days.push(d);
       });
     });
@@ -454,6 +456,36 @@ function scheduleDays_() {
   try { cache.put('days:' + id, JSON.stringify(out), SCHEDULE_CACHE_SEC); } catch (e) {}
   return out;
 }
+
+/** Текст ячеек без красных фрагментов: красным завучи пишут индивидуальные занятия с именами детей. */
+function valuesWithoutRed_(range) {
+  var values = range.getDisplayValues(), rich = range.getRichTextValues();
+  for (var r = 0; r < values.length; r++) for (var c = 0; c < values[r].length; c++) {
+    var rt = rich[r] && rich[r][c];
+    if (!rt || !values[r][c]) continue;
+    try {
+      var runs = rt.getRuns(), kept = '', dropped = false;
+      runs.forEach(function (run) {
+        if (isRed_(run.getTextStyle().getForegroundColor())) dropped = true; else kept += run.getText();
+      });
+      if (dropped) values[r][c] = kept;
+    } catch (e) {}
+  }
+  return values;
+}
+function isRed_(hex) {
+  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ''));
+  if (!m) return false;
+  var r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  return r >= 170 && g <= 110 && b <= 110;
+}
+
+/** Значение из вкладки «Настройки» списком: строка, где «Параметр» содержит слово. */
+function settingList_(word) {
+  var row = readAll_('settings').filter(function (s) { return norm_(s['Параметр']).indexOf(word) >= 0; })[0];
+  return row ? String(row['Значение']).split(/[,;\n]/).map(function (s) { return s.trim(); }).filter(String) : [];
+}
+function norm_(s) { return String(s || '').toLowerCase().replace(/ё/g, 'е').trim(); }
 
 var WEEKDAYS_RE_ = /(понедельник|вторник|сред[аы]|четверг|пятниц[аы]|суббот[аы]|воскресень[ея])[^0-9]{0,6}(\d{1,2})[.\/](\d{1,2})(?:[.\/](\d{2,4}))?/i;
 
@@ -485,9 +517,13 @@ function dateFromParts_(d, m, y, todayIso) {
  * Разбор сетки. Чистая функция: на входе значения, объединения и цвета, на выходе дни.
  * values[r][c] — текст ячеек, merges — [{r1,c1,r2,c2}] (с нуля, включительно), colors[r][c] — фон.
  */
-function parseScheduleGrid_(values, merges, colors, sheetName, todayIso) {
+function parseScheduleGrid_(values, merges, colors, sheetName, todayIso, opts) {
+  opts = opts || {};
+  var rooms = roomList_(opts.rooms);
   var R = values.length, C = R ? values[0].length : 0;
-  var v = values.map(function (row) { return row.map(function (x) { return String(x == null ? '' : x).replace(/\r/g, '').trim(); }); });
+  var v = values.map(function (row) { return row.map(function (x) {
+    return String(x == null ? '' : x).replace(/\r/g, '').replace(/(\d)\s*([:.])\s*\n\s*(\d)/g, '$1$2$3').trim();
+  }); });
   var bg = (colors || []).map(function (row) { return row.slice(); });
   var span = []; // сколько классов накрывает объединённая ячейка
   for (var r0 = 0; r0 < R; r0++) { span.push([]); for (var c0 = 0; c0 < C; c0++) span[r0].push(1); }
@@ -545,14 +581,20 @@ function parseScheduleGrid_(values, merges, colors, sheetName, todayIso) {
         var text = stripTimes_(raw);
         var time = ranges.length ? ranges[ranges.length - 1] : labelTime;
         if (!time) return;
-        var groups = splitGroups_(text);
-        var kind, title = groups.join(' / ');
-        if (!groups.length) { kind = 'break'; title = 'Перемена'; }
-        else if (groups.length === 1 && /^(большая\s+)?(перемена|обед|полдник|завтрак|ужин|спортивная перемена|динамическая пауза)/i.test(groups[0])) kind = 'break';
-        else if (lessonNum) kind = 'lesson';
-        else if (!seenLesson || /самоподготовк|кружк/i.test(text)) kind = 'activity';
-        else kind = 'lesson';
-        var it = { kind: kind, start: time[0], end: time[1], title: title, groups: kind === 'break' ? [] : groups };
+        var flat = text.replace(/\s+/g, ' ').trim();
+        var bm = BREAK_RE_.exec(flat);
+        var kind, groups = [], title;
+        if (!flat.replace(/[\s\-–—\/:.,]+/g, '')) { kind = 'break'; title = 'Перемена'; }
+        else if (bm) { kind = 'break'; title = cap_(bm[0].toLowerCase().replace(/\s+/g, ' ')); } // «Обед ДОЛЖНЫ ОСТАТЬСЯ…» → «Обед»
+        else {
+          if (lessonNum) kind = 'lesson';
+          else if (!seenLesson || /самоподготовк|кружк|•/i.test(text)) kind = 'activity';
+          else kind = 'lesson';
+          groups = kind === 'lesson' ? lessonGroups_(text, rooms) : activityGroups_(text);
+          if (!groups.length) return;
+          title = groups.map(function (g) { return g.subject; }).join(' / ');
+        }
+        var it = { kind: kind, start: time[0], end: time[1], title: title, groups: groups };
         if (!ranges.length) it._labelTime = true;
         if (kind === 'lesson' && lessonNum) it.num = Number(lessonNum);
         if (kind === 'break' && /обед|полдник|завтрак|ужин/i.test(title)) it.meal = true;
@@ -605,22 +647,84 @@ function stripTimes_(s) {
   return String(s || '').replace(/(\d{1,2})[:.](\d{2})\s*[-–—]\s*(\d{1,2})[:.](\d{2})/g, ' ').replace(/[ \t]+/g, ' ').trim();
 }
 
-/** Делим ячейку на группы: «РУССКИЙ ЯЗЫК / МАТЕМАТИКА», «- Кружок\n- Клуб». */
-function splitGroups_(text) {
-  var parts = String(text || '').split(/\s*\/\s*|\n\s*[-–•]\s*|^\s*[-–•]\s*/);
-  var out = [];
-  parts.forEach(function (p) {
-    p = p.replace(/\s*\n\s*/g, ' ').replace(/^[-–•\s]+|[\s:;,]+$/g, '').trim();
-    if (p) out.push(pretty_(p));
+var BREAK_RE_ = /^(большая\s+|спортивная\s+)?(перемена|обед|полдник|завтрак|ужин|динамическая\s+пауза)/i;
+
+// Кабинеты, как их пишут завучи. Свои можно дописать во вкладке «Настройки» (строка «Кабинеты»).
+var DEFAULT_ROOMS = ['Харбор бол', 'Харбор мал', 'Харбор', 'Мюнх', 'Драгон', 'РоузБокс', 'Нарния', 'Бриз', 'Театр', 'Библ 2эт', 'Библиотека',
+  'Дэнс', 'Поточка 2 эт', 'Поточка', 'Англ кабинеты', 'Англ каб', 'YellowLife', 'Mount', 'Forest', 'LS', 'YL', 'WF', 'МР', 'Спортзал', 'Актовый зал'];
+
+function roomList_(extra) {
+  var seen = {}, out = [];
+  (extra || []).concat(DEFAULT_ROOMS).forEach(function (r) {
+    r = String(r || '').trim(); var k = norm_(r).replace(/\s+/g, '');
+    if (r && !seen[k]) { seen[k] = true; out.push(r); }
   });
-  return out;
+  return out.sort(function (a, b) { return b.length - a.length; });
+}
+
+/** Находит кабинеты в тексте: «Харбор Бол», «ХарборБол», «харборМал», «(mount)», «артТеатр». */
+function takeRooms_(s, rooms) {
+  var found = [];
+  rooms.forEach(function (room) {
+    var re = new RegExp(room.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*'), 'gi');
+    s = s.replace(re, function (m, off, all) {
+      var before = all.charAt(off - 1), after = all.charAt(off + m.length);
+      var letterBefore = /[A-Za-zА-Яа-яЁё]/.test(before), camel = /[а-яёa-z]/.test(before) && /[А-ЯЁA-Z]/.test(m.charAt(0));
+      if ((letterBefore && !camel) || /[A-Za-zА-Яа-яЁё0-9]/.test(after)) return m;
+      if (m === m.toUpperCase() && m.length >= 3 && room !== room.toUpperCase()) return m; // «ТЕАТР» капсом — это предмет
+      if (found.indexOf(room) < 0) found.push(room);
+      return ' ';
+    });
+  });
+  return { rooms: found, rest: s };
+}
+
+var SUBJECT_NAMES_ = { 'ИНД РАБ': 'Индивидуальная работа', '2 ЯЗЫК': 'Второй язык', 'ДОП МАТЕМАТИКА': 'Доп. математика', 'ИНГЛИШ ТАЙМ': 'English Time' };
+
+/** Урок: группы через «/» или с новой строки, каждая — ПРЕДМЕТ капсом, потом учителя и кабинет. */
+function lessonGroups_(text, rooms) {
+  var segs = String(text || '').split(/\s*\/\s*|\n/).map(function (s) { return s.trim(); }).filter(function (s) { return s && !/^[,.;+\-–]+$/.test(s); });
+  var parts = [];
+  segs.forEach(function (s) {
+    if (!parts.length || /^(\d+(\.\d+)?\s+)?[А-ЯЁ]{3,}(?![а-яё])/.test(s) || /^\d\s+ЯЗЫК/.test(s)) parts.push([s]);
+    else parts[parts.length - 1].push(s); // «Драгон», «и англ каб», «Ирина, Алина Вл» — продолжение группы
+  });
+  return parts.map(function (p) { return parseGroup_(p.join(' '), rooms); }).filter(function (g) { return g.subject; });
+}
+
+function parseGroup_(s, rooms) {
+  s = s.replace(/\s+/g, ' ').trim();
+  var code = '';
+  var m = /^(\d+(?:\.\d+)?)\s+(?!язык)/i.exec(s);
+  if (m && /^[А-ЯЁ]{2,}/.test(s.slice(m[0].length))) { code = m[1]; s = s.slice(m[0].length); }
+  var r = takeRooms_(s, rooms);
+  var tokens = r.rest.replace(/\s+/g, ' ').trim().split(' ');
+  var subj = [], i = 0;
+  while (i < tokens.length && (/^\(?[А-ЯЁ0-9.\-]*[А-ЯЁ][А-ЯЁ0-9.\-]*\)?,?$/.test(tokens[i]) || (i === 0 && /^\d$/.test(tokens[i])))) subj.push(tokens[i++]);
+  var subject = subj.join(' ').replace(/,$/, '');
+  var teachers = tokens.slice(i).join(' ')
+    .replace(/\(\s*\)/g, ' ').replace(/\s*\+\s*/g, ' + ').replace(/\s*,\s*/g, ', ').replace(/\s+/g, ' ')
+    .replace(/^[\s,;\/+\-–]+|[\s,;\/+\-–]+$/g, '').replace(/(\s+и)+$/, '').trim();
+  if (!subject) { subject = teachers; teachers = ''; } // ячейку написали не капсом — показываем как есть
+  var g = { subject: SUBJECT_NAMES_[subject] || pretty_(subject) };
+  if (code) g.code = code;
+  if (teachers) g.teachers = teachers;
+  if (r.rooms.length) g.room = r.rooms.join(', ');
+  return g;
+}
+
+/** Кружки и самоподготовка: пункты списка («•», «-») или через «/». */
+function activityGroups_(text) {
+  return String(text || '').split(/\n\s*[•\-–]\s*|^\s*[•\-–]\s*|\s*\/\s*|\s*•\s*/).map(function (p) {
+    return p.replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').replace(/^[-–•\s]+|[\s:;,]+$/g, '').trim();
+  }).filter(String).map(function (p) { return { subject: pretty_(p) }; });
 }
 
 /** «РУССКИЙ ЯЗЫК (ПРЕДЗАЧЕТ)» → «Русский язык (предзачет)», аббревиатуры (РПС, ТДФ) не трогаем. */
 function pretty_(s) {
   if (/[а-яё]/.test(s) || !/[А-ЯЁ]/.test(s)) return s;
   var t = s.replace(/[А-ЯЁA-Z]+/g, function (w) {
-    return (w.length <= 4 && !/[АЕЁИОУЫЭЮЯAEIOUY]/.test(w)) ? w : w.toLowerCase();
+    return (w.length >= 2 && w.length <= 4 && !/[АЕЁИОУЫЭЮЯAEIOUY]/.test(w)) ? w : w.toLowerCase();
   });
   return cap_(t);
 }

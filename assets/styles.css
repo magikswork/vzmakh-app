@@ -259,11 +259,23 @@ a.card:hover{border-color:var(--line-strong)}
 .td-body{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:5px}
 .td-title{font-weight:600;font-size:16.5px;overflow-wrap:anywhere}
 .td-label{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.td-groups{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
-.td-groups li{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:4px 10px;font-weight:600;font-size:14.5px;overflow-wrap:anywhere}
+.td-one{display:flex;flex-direction:column;gap:3px;min-width:0}
+.td-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:13.5px;color:var(--muted);line-height:1.35}
+.td-teachers{overflow-wrap:anywhere}
+.td-class{font-weight:700;color:var(--ink)}
+.room{display:inline-flex;align-items:center;gap:4px;font-weight:600;color:var(--blue);white-space:nowrap}
+.room::before{content:"";width:6px;height:6px;border-radius:2px;background:currentColor;opacity:.7}
+.td-groups{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;gap:0;align-self:stretch}
+.tg{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px dashed var(--line)}
+.tg:first-child{border-top:0;padding-top:2px}
+.tg-code{flex:none;min-width:30px;height:22px;padding:0 6px;border-radius:7px;background:var(--blue-soft);color:var(--blue);font:700 12px/22px var(--body);text-align:center;font-variant-numeric:tabular-nums}
+.tg-code.inline{display:inline-block;margin-left:8px;vertical-align:2px;min-width:0}
+.tg-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.tg-subject{font-weight:600;font-size:15.5px;overflow-wrap:anywhere}
+.td-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-size:15px}
+.td-list li::marker{color:var(--orange)}
 .td-activity{background:transparent;border-style:dashed}
-.td-activity .td-title,.td-activity .td-groups li{font-weight:500}
-.td-activity .td-groups li{background:var(--card)}
+.td-activity .td-title{font-weight:500}
 .td-break{display:flex;align-items:center;gap:10px;background:transparent;border:0;border-radius:12px;padding:4px 14px 4px 58px;min-height:30px;font-size:13.5px;color:var(--muted)}
 .td-break::before{display:none}
 .td-break-time{font-variant-numeric:tabular-nums;min-width:86px}
